@@ -670,6 +670,14 @@ private final class MenuBarOverlayPanelContentView: NSView {
                 isInset: fullConfiguration.isInset,
                 screen: overlayPanel.owningScreen
             )
+        case .transparent:
+            // Reuse split pills for border geometry, but full wallpaper will be drawn
+            pathForSplitShape(
+                in: drawableBounds,
+                info: fullConfiguration.splitShapeInfo,
+                isInset: fullConfiguration.isInset,
+                screen: overlayPanel.owningScreen
+            )
         }
 
         var hasBorder = false
@@ -745,6 +753,25 @@ private final class MenuBarOverlayPanelContentView: NSView {
 
                 drawTint(in: drawableBounds)
             }
+        case .transparent:
+            // TRANSPARENT: remove menubar blur entirely.
+            // Draw wallpaper over the entire menubar (no inverted clip),
+            // skip shadow/tint that would re-introduce blur. Pills remain
+            // available for border only. This reuses split logic for
+            // geometry but makes the bar fully see-through.
+            if let desktopWallpaper = overlayPanel.desktopWallpaper {
+                context.saveGraphicsState()
+                defer { context.restoreGraphicsState() }
+                context.cgContext.draw(desktopWallpaper, in: drawableBounds)
+            } else {
+                // Fallback: clear so system blur shows if wallpaper not ready
+                NSColor.clear.setFill()
+                drawableBounds.fill()
+            }
+            if configuration.hasBorder {
+                hasBorder = true
+            }
+            // Intentionally skip shadow and tint to keep it transparent
 
             if
                 hasBorder,
@@ -766,6 +793,13 @@ private final class MenuBarOverlayPanelContentView: NSView {
                         screen: overlayPanel.owningScreen
                     )
                 case .split:
+                    pathForSplitShape(
+                        in: drawableBounds,
+                        info: fullConfiguration.splitShapeInfo,
+                        isInset: fullConfiguration.isInset,
+                        screen: overlayPanel.owningScreen
+                    )
+                case .transparent:
                     pathForSplitShape(
                         in: drawableBounds,
                         info: fullConfiguration.splitShapeInfo,

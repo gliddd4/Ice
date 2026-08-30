@@ -22,6 +22,10 @@ enum MenuBarShapeKind: Int, Codable, Hashable, CaseIterable {
     /// A custom shape that splits the menu bar between
     /// its leading and trailing sides.
     case split = 2
+    /// A transparent shape that reuses the split pills but
+    /// removes the menu bar blur entirely (wallpaper shows
+    /// through everywhere, no tint/shadow blur).
+    case transparent = 3
 }
 
 /// Information for the ``MenuBarShapeKind/full`` menu bar

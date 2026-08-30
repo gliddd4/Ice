@@ -1,0 +1,28 @@
+name: Build Ice
+
+on:
+  push:
+    branches: [ "transparent-menubar", "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+      - name: Build (no signing)
+        run: |
+          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" build
+      - name: Archive artifact
+        if: success()
+        run: |
+          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" DSTROOT=/tmp/Ice.dst build || true
+          mkdir -p /tmp/artifacts
+          find ~/Library/Developer/Xcode/DerivedData -name "Ice.app" -type d | head -n 5
+          find . -name "*.app" | head -n 10
+      - name: SwiftLint
+        run: swiftlint --strict || true

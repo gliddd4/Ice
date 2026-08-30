@@ -25,6 +25,8 @@ struct MenuBarShapePicker: View {
                     Text("Full").tag(shape)
                 case .split:
                     Text("Split").tag(shape)
+                case .transparent:
+                    Text("Transparent").tag(shape)
                 }
             }
         }
@@ -45,6 +47,15 @@ struct MenuBarShapePicker: View {
             MenuBarSplitShapeExampleView(info: appearanceManager.bindings.configuration.splitShapeInfo)
                 .equatable()
                 .foregroundStyle(colorScheme == .dark ? .primary : .secondary)
+        case .transparent:
+            VStack(spacing: 4) {
+                MenuBarSplitShapeExampleView(info: appearanceManager.bindings.configuration.splitShapeInfo)
+                    .equatable()
+                    .foregroundStyle(colorScheme == .dark ? .primary : .secondary)
+                Text("Transparent • wallpaper everywhere, no blur")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
