@@ -754,24 +754,33 @@ private final class MenuBarOverlayPanelContentView: NSView {
                 drawTint(in: drawableBounds)
             }
         case .transparent:
-            // TRANSPARENT: remove menubar blur entirely.
-            // Draw wallpaper over the entire menubar (no inverted clip),
-            // skip shadow/tint that would re-introduce blur. Pills remain
-            // available for border only. This reuses split logic for
-            // geometry but makes the bar fully see-through.
             if let desktopWallpaper = overlayPanel.desktopWallpaper {
                 context.saveGraphicsState()
                 defer { context.restoreGraphicsState() }
+                // Keep icons visible: exclude menu bar item frames from wallpaper draw
+                let items = MenuBarItem.getMenuBarItems(on: overlayPanel.owningScreen.displayID, onScreenOnly: true, activeSpaceOnly: false)
+                let clipPath = NSBezierPath(rect: drawableBounds)
+                for item in items {
+                    let viewRect = CGRect(
+                        x: item.frame.minX - overlayPanel.frame.minX,
+                        y: item.frame.minY - overlayPanel.frame.minY,
+                        width: item.frame.width,
+                        height: item.frame.height
+                    )
+                    let intersect = viewRect.intersection(drawableBounds)
+                    if !intersect.isEmpty {
+                        clipPath.append(NSBezierPath(rect: intersect).reversed)
+                    }
+                }
+                clipPath.setClip()
                 context.cgContext.draw(desktopWallpaper, in: drawableBounds)
             } else {
-                // Fallback: clear so system blur shows if wallpaper not ready
                 NSColor.clear.setFill()
                 drawableBounds.fill()
             }
             if configuration.hasBorder {
                 hasBorder = true
             }
-            // Intentionally skip shadow and tint to keep it transparent
 
             if
                 hasBorder,
