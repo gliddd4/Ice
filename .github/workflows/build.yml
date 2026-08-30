@@ -18,15 +18,28 @@ jobs:
           sudo xcode-select -p
           sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer 2>/dev/null || sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer 2>/dev/null || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
-      - name: Build (no signing)
+      - name: Build Intel (x86_64, no signing) for your Mac
         run: |
-          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" build
-      - name: Archive artifact
+          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO build
+      - name: Build Release + package Intel artifact
         if: success()
         run: |
-          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" DSTROOT=/tmp/Ice.dst build || true
+          xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO DSTROOT=/tmp/Ice.dst build
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "Ice.app" -type d | head -n 1)
+          echo "Found app: $APP"
+          ls -lh "$APP/Contents/MacOS/Ice" || true
+          file "$APP/Contents/MacOS/Ice" || true
+          # Verify Intel
+          lipo -archs "$APP/Contents/MacOS/Ice" || true
           mkdir -p /tmp/artifacts
-          find ~/Library/Developer/Xcode/DerivedData -name "Ice.app" -type d | head -n 5
-          find . -name "*.app" | head -n 10
+          ditto -c -k --sequesterRsrc --keepParent "$APP" /tmp/artifacts/Ice-Intel-Transparent.zip
+          ls -lh /tmp/artifacts/
+      - name: Upload Intel artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ice-Intel-Transparent
+          path: /tmp/artifacts/Ice-Intel-Transparent.zip
+          retention-days: 7
       - name: SwiftLint
         run: swiftlint --strict || true
