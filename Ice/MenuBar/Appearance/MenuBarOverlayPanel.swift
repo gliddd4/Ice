@@ -63,8 +63,8 @@ final class MenuBarOverlayPanel: NSPanel {
     /// The frame of the application menu.
     @Published private(set) var applicationMenuFrame: CGRect?
 
-    /// The current desktop wallpaper, clipped to the bounds of the menu bar.
-    @Published private(set) var desktopWallpaper: CGImage?
+    /// The wallpaper that belongs behind the menu bar, positioned for the bar.
+    @Published private(set) var desktopWallpaperCrop: MenuBarWallpaperCrop?
 
     /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
@@ -289,19 +289,23 @@ final class MenuBarOverlayPanel: NSPanel {
         applicationMenuFrame = menuBarManager.getApplicationMenuFrame(for: display)
     }
 
-    /// Stores the area of the desktop wallpaper that is under the menu bar
-    /// of the given display.
+    /// Stores the wallpaper that belongs behind the menu bar of the given display.
+    ///
+    /// Read from the wallpaper's own file, rather than captured from the wallpaper
+    /// window: the capture needs the Screen Recording permission, and what comes back
+    /// from it is the copy Ice installed - which carries a black band across the menu
+    /// bar - so it cannot be used to show what the bar actually covers.
     private func updateDesktopWallpaper(for display: CGDirectDisplayID, with windows: [WindowInfo]) {
         guard
-            let wallpaperWindow = WindowInfo.getWallpaperWindow(from: windows, for: display),
-            let menuBarWindow = WindowInfo.getMenuBarWindow(from: windows, for: display)
+            display == owningScreen.displayID,
+            WindowInfo.getMenuBarWindow(from: windows, for: display) != nil
         else {
             return
         }
-        let wallpaper = ScreenCapture.captureWindow(wallpaperWindow.windowID, screenBounds: menuBarWindow.frame)
-        if desktopWallpaper?.dataProvider?.data != wallpaper?.dataProvider?.data {
-            desktopWallpaper = wallpaper
-        }
+        desktopWallpaperCrop = MenuBarWallpaper.crop(
+            for: owningScreen,
+            frame: MenuBarWallpaper.menuBarRect(for: owningScreen)
+        )
     }
 
     /// Updates the panel to prepare for display.
@@ -363,6 +367,10 @@ private final class MenuBarOverlayPanelContentView: NSView {
     @Published private var previewConfiguration: MenuBarAppearancePartialConfiguration?
 
     private var cancellables = Set<AnyCancellable>()
+
+    /// The view that shows the wallpaper behind a transparent menu bar, or `nil` when
+    /// the current shape kind does not use one.
+    private var transparentBackdrop: MenuBarTransparentBackdropView?
 
     /// The overlay panel that contains the content view.
     private var overlayPanel: MenuBarOverlayPanel? {
@@ -440,7 +448,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
                 }
                 .store(in: &c)
             // Redraw whenever the desktop wallpaper changes.
-            overlayPanel.$desktopWallpaper
+            overlayPanel.$desktopWallpaperCrop
                 .sink { [weak self] _ in
                     self?.needsDisplay = true
                 }
@@ -455,7 +463,41 @@ private final class MenuBarOverlayPanelContentView: NSView {
             }
             .store(in: &c)
 
+        // The transparent shape kind shows the wallpaper behind the bar, which is a
+        // view of its own rather than anything the receiver draws.
+        $fullConfiguration
+            .map(\.shapeKind)
+            .removeDuplicates()
+            .sink { [weak self] shapeKind in
+                self?.updateTransparentBackdrop(for: shapeKind)
+            }
+            .store(in: &c)
+
         cancellables = c
+    }
+
+    /// Adds or removes the view that shows the wallpaper behind a transparent menu bar.
+    private func updateTransparentBackdrop(for shapeKind: MenuBarShapeKind) {
+        guard let overlayPanel, shapeKind == .transparent else {
+            transparentBackdrop?.removeFromSuperview()
+            transparentBackdrop = nil
+            return
+        }
+
+        if let transparentBackdrop {
+            transparentBackdrop.frame = getDrawableBounds()
+            return
+        }
+
+        let backdropView = MenuBarTransparentBackdropView(screen: overlayPanel.owningScreen)
+        backdropView.frame = getDrawableBounds()
+        addSubview(backdropView)
+        transparentBackdrop = backdropView
+    }
+
+    override func layout() {
+        super.layout()
+        transparentBackdrop?.frame = getDrawableBounds()
     }
 
     /// Returns a path in the given rectangle, with the given end caps,
@@ -643,6 +685,32 @@ private final class MenuBarOverlayPanelContentView: NSView {
         }
     }
 
+    /// Draws the wallpaper that belongs behind the menu bar into the given
+    /// rectangle, which is in the receiver's own coordinate space.
+    private func drawDesktopWallpaper(in rect: CGRect) {
+        // Only wallpaper is ever drawn, and only where the wallpaper actually reaches.
+        // Filling the rest with a colour would put a bar of Ice's own making on screen.
+        guard
+            let crop = overlayPanel?.desktopWallpaperCrop,
+            let image = crop.image
+        else {
+            return
+        }
+
+        // `destination` is in the crop's pixel space with a top-left origin, whereas
+        // the receiver's coordinate space is bottom-left in points.
+        let scale = window?.backingScaleFactor ?? 2
+        let destination = crop.destination
+        let target = CGRect(
+            x: rect.minX + destination.minX / scale,
+            y: rect.maxY - destination.maxY / scale,
+            width: destination.width / scale,
+            height: destination.height / scale
+        )
+
+        NSGraphicsContext.current?.cgContext.draw(image, in: target)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard
             let overlayPanel,
@@ -713,7 +781,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
                 NSBezierPath(rect: borderBounds).fill()
             }
         case .full, .split:
-            if let desktopWallpaper = overlayPanel.desktopWallpaper {
+            if overlayPanel.desktopWallpaperCrop != nil {
                 context.saveGraphicsState()
                 defer {
                     context.restoreGraphicsState()
@@ -723,7 +791,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
                 invertedClipPath.append(shapePath.reversed)
                 invertedClipPath.setClip()
 
-                context.cgContext.draw(desktopWallpaper, in: drawableBounds)
+                drawDesktopWallpaper(in: drawableBounds)
             }
 
             if configuration.hasShadow {
@@ -754,30 +822,10 @@ private final class MenuBarOverlayPanelContentView: NSView {
                 drawTint(in: drawableBounds)
             }
         case .transparent:
-            if let desktopWallpaper = overlayPanel.desktopWallpaper {
-                context.saveGraphicsState()
-                defer { context.restoreGraphicsState() }
-                // Keep icons visible: exclude menu bar item frames from wallpaper draw
-                let items = MenuBarItem.getMenuBarItems(on: overlayPanel.owningScreen.displayID, onScreenOnly: true, activeSpaceOnly: false)
-                let clipPath = NSBezierPath(rect: drawableBounds)
-                for item in items {
-                    let viewRect = CGRect(
-                        x: item.frame.minX - overlayPanel.frame.minX,
-                        y: item.frame.minY - overlayPanel.frame.minY,
-                        width: item.frame.width,
-                        height: item.frame.height
-                    )
-                    let intersect = viewRect.intersection(drawableBounds)
-                    if !intersect.isEmpty {
-                        clipPath.append(NSBezierPath(rect: intersect).reversed)
-                    }
-                }
-                clipPath.setClip()
-                context.cgContext.draw(desktopWallpaper, in: drawableBounds)
-            } else {
-                NSColor.clear.setFill()
-                drawableBounds.fill()
-            }
+            // Nothing is drawn behind the bar. The wallpaper a transparent menu bar
+            // shows is carried by ``transparentBackdrop``, which filters what the system
+            // draws rather than painting over it, so that the bar's own menus and status
+            // items keep showing through.
             if configuration.hasBorder {
                 hasBorder = true
             }
