@@ -87,8 +87,8 @@ enum MenuBarWallpaper {
     static func isManagedWallpaper(_ url: URL) -> Bool {
         let directory = url.deletingLastPathComponent().standardizedFileURL
 
-        if let managed = Wallpaper.applicationSupportDirectory()?.standardizedFileURL,
-           directory == managed {
+        let managed = Wallpaper.applicationSupportDirectory()?.standardizedFileURL
+        if managed == directory {
             return true
         }
 
